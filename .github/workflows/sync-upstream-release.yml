@@ -171,8 +171,9 @@ jobs:
         env:
           YAAK_VERSION: ${{ needs.prepare.outputs.release_version }}
 
+      # 仅当配置了 Apple 签名相关 Secrets 时执行；未配置时跳过，构建未签名的 macOS 包（fork 通常无需签名）
       - name: Sign vendored binaries (macOS only)
-        if: matrix.os == 'macos'
+        if: matrix.os == 'macos' && secrets.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
