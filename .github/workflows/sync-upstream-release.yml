@@ -172,8 +172,20 @@ jobs:
           YAAK_VERSION: ${{ needs.prepare.outputs.release_version }}
 
       # 仅当配置了 Apple 签名相关 Secrets 时执行；未配置时跳过，构建未签名的 macOS 包（fork 通常无需签名）
+      - name: Check secrets
+        id: check_secrets
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "has_apple=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_apple=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Sign vendored binaries (macOS only)
-        if: matrix.os == 'macos' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.os == 'macos' && steps.check_secrets.outputs.has_apple == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
