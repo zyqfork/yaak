@@ -195,6 +195,45 @@ jobs:
           codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaakprotoc.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/protoc/yaakprotoc || true
           codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaaknode.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/node/yaaknode || true
 
+      - name: Disable updater/signing if secrets missing
+        shell: bash
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -z "$TAURI_PRIVATE_KEY" ]; then
+            echo "TAURI_PRIVATE_KEY is missing. Disabling updater in tauri.release.conf.json"
+            node -e "
+              const fs = require('fs');
+              const path = './crates-tauri/yaak-app/tauri.release.conf.json';
+              try {
+                const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+                
+                // Disable updater if key missing
+                if (!process.env.TAURI_PRIVATE_KEY) {
+                   if (conf.plugins && conf.plugins.updater) delete conf.plugins.updater;
+                   if (conf.bundle) conf.bundle.createUpdaterArtifacts = false;
+                   console.log('Updater disabled.');
+                }
+
+                // Disable Windows signing if Azure secrets missing
+                if (!process.env.AZURE_CLIENT_ID) {
+                   if (conf.bundle && conf.bundle.windows && conf.bundle.windows.signCommand) {
+                     delete conf.bundle.windows.signCommand;
+                     console.log('Windows signing disabled.');
+                   }
+                }
+
+                fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+              } catch (e) {
+                console.error(e);
+                process.exit(1);
+              }
+            "
+          else
+            echo "TAURI_PRIVATE_KEY is present. Keeping updater enabled."
+          fi
+
       - uses: tauri-apps/tauri-action@v0
         env:
           YAAK_TARGET_ARCH: ${{ matrix.yaak_arch }}
