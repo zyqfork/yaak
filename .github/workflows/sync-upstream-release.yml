@@ -225,7 +225,13 @@ jobs:
                 if (!process.env.TAURI_PRIVATE_KEY) {
                    if (conf.plugins && conf.plugins.updater) delete conf.plugins.updater;
                    if (conf.bundle) conf.bundle.createUpdaterArtifacts = false;
-                   console.log('Updater disabled.');
+                   
+                   // Remove 'updater' feature to prevent Rust code from initializing the plugin
+                   if (conf.build && conf.build.features) {
+                     conf.build.features = conf.build.features.filter(f => f !== 'updater');
+                   }
+                   
+                   console.log('Updater disabled (plugin + feature).');
                 }
 
                 // Disable Windows signing if Azure secrets missing
