@@ -246,25 +246,51 @@ jobs:
             echo "TAURI_PRIVATE_KEY is present. Keeping updater enabled."
           fi
 
+      - name: Setup Signing Secrets
+        shell: bash
+        env:
+          S_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          S_APPLE_CERT_PWD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S_APPLE_ID: ${{ secrets.APPLE_ID }}
+          S_APPLE_PWD: ${{ secrets.APPLE_PASSWORD }}
+          S_APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          
+          S_TAURI_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          S_TAURI_PWD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          
+          S_AZURE_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          S_AZURE_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          S_AZURE_TENANT: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          # macOS Signing
+          if [ -n "$S_APPLE_CERT" ]; then
+            echo "APPLE_CERTIFICATE=$S_APPLE_CERT" >> $GITHUB_ENV
+            echo "APPLE_CERTIFICATE_PASSWORD=$S_APPLE_CERT_PWD" >> $GITHUB_ENV
+            echo "APPLE_ID=$S_APPLE_ID" >> $GITHUB_ENV
+            echo "APPLE_PASSWORD=$S_APPLE_PWD" >> $GITHUB_ENV
+            echo "APPLE_SIGNING_IDENTITY=$S_APPLE_IDENTITY" >> $GITHUB_ENV
+            echo "APPLE_TEAM_ID=$S_APPLE_TEAM_ID" >> $GITHUB_ENV
+            echo "ENABLE_CODE_SIGNING=$S_APPLE_CERT" >> $GITHUB_ENV
+          fi
+
+          # Tauri Updater
+          if [ -n "$S_TAURI_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY=$S_TAURI_KEY" >> $GITHUB_ENV
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$S_TAURI_PWD" >> $GITHUB_ENV
+          fi
+          
+          # Windows Signing
+          if [ -n "$S_AZURE_ID" ]; then
+            echo "AZURE_CLIENT_ID=$S_AZURE_ID" >> $GITHUB_ENV
+            echo "AZURE_CLIENT_SECRET=$S_AZURE_SECRET" >> $GITHUB_ENV
+            echo "AZURE_TENANT_ID=$S_AZURE_TENANT" >> $GITHUB_ENV
+          fi
+
       - uses: tauri-apps/tauri-action@v0
         env:
           YAAK_TARGET_ARCH: ${{ matrix.yaak_arch }}
-
-          ENABLE_CODE_SIGNING: ${{ secrets.APPLE_CERTIFICATE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
-          APPLE_CERTIFICATE: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ matrix.os == 'macos' && secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos' && secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ matrix.os == 'macos' && secrets.APPLE_TEAM_ID }}
-
-          AZURE_CLIENT_ID: ${{ matrix.os == 'windows' && secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ matrix.os == 'windows' && secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ matrix.os == 'windows' && secrets.AZURE_TENANT_ID }}
         with:
           tagName: "v${{ needs.prepare.outputs.release_version }}"
           releaseName: "Sync Release ${{ needs.prepare.outputs.release_version }}"
