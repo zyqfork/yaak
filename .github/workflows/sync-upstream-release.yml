@@ -242,6 +242,12 @@ jobs:
                    }
                 }
 
+                // Always remove 'license' feature (user request)
+                if (conf.build && conf.build.features) {
+                  conf.build.features = conf.build.features.filter(f => f !== 'license');
+                  console.log('License feature removed.');
+                }
+
                 fs.writeFileSync(path, JSON.stringify(conf, null, 2));
               } catch (e) {
                 console.error(e);
