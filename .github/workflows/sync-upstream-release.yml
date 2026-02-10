@@ -248,6 +248,16 @@ jobs:
                   console.log('License feature removed.');
                 }
 
+                // Remove yaak-license permissions from capabilities
+                if (conf.app && conf.app.security && conf.app.security.capabilities) {
+                  conf.app.security.capabilities.forEach(cap => {
+                    if (typeof cap === 'object' && cap.permissions) {
+                      cap.permissions = cap.permissions.filter(p => p !== 'yaak-license:default');
+                    }
+                  });
+                  console.log('Removed yaak-license permissions.');
+                }
+
                 fs.writeFileSync(path, JSON.stringify(conf, null, 2));
               } catch (e) {
                 console.error(e);
