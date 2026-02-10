@@ -207,31 +207,29 @@ jobs:
           codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaakprotoc.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/protoc/yaakprotoc || true
           codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaaknode.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/node/yaaknode || true
 
-      - name: Disable updater/signing if secrets missing
+      - name: Configure Fork Build (Config Only)
         shell: bash
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
-          if [ -z "$TAURI_PRIVATE_KEY" ]; then
-            echo "TAURI_PRIVATE_KEY is missing. Disabling updater in tauri.release.conf.json"
-            node -e "
-              const fs = require('fs');
-              const path = './crates-tauri/yaak-app/tauri.release.conf.json';
+          node -e "
+            const fs = require('fs');
+            
+            // Modify tauri.release.conf.json only
+            const configPath = './crates-tauri/yaak-app/tauri.release.conf.json';
+            if (fs.existsSync(configPath)) {
               try {
-                const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+                const conf = JSON.parse(fs.readFileSync(configPath, 'utf8'));
                 
                 // Disable updater if key missing
                 if (!process.env.TAURI_PRIVATE_KEY) {
                    if (conf.plugins && conf.plugins.updater) delete conf.plugins.updater;
                    if (conf.bundle) conf.bundle.createUpdaterArtifacts = false;
-                   
-                   // Remove 'updater' feature to prevent Rust code from initializing the plugin
                    if (conf.build && conf.build.features) {
                      conf.build.features = conf.build.features.filter(f => f !== 'updater');
                    }
-                   
-                   console.log('Updater disabled (plugin + feature).');
+                   console.log('Updater disabled.');
                 }
 
                 // Disable Windows signing if Azure secrets missing
@@ -242,31 +240,26 @@ jobs:
                    }
                 }
 
-                // Always remove 'license' feature (user request)
+                // Remove 'license' feature & permissions
                 if (conf.build && conf.build.features) {
                   conf.build.features = conf.build.features.filter(f => f !== 'license');
-                  console.log('License feature removed.');
                 }
-
-                // Remove yaak-license permissions from capabilities
                 if (conf.app && conf.app.security && conf.app.security.capabilities) {
                   conf.app.security.capabilities.forEach(cap => {
                     if (typeof cap === 'object' && cap.permissions) {
                       cap.permissions = cap.permissions.filter(p => p !== 'yaak-license:default');
                     }
                   });
-                  console.log('Removed yaak-license permissions.');
                 }
+                console.log('License feature config removed.');
 
-                fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+                fs.writeFileSync(configPath, JSON.stringify(conf, null, 2));
               } catch (e) {
-                console.error(e);
+                console.error('Error modifying config:', e);
                 process.exit(1);
               }
-            "
-          else
-            echo "TAURI_PRIVATE_KEY is present. Keeping updater enabled."
-          fi
+            }
+          "
 
       - name: Setup Signing Secrets
         shell: bash
