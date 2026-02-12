@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write   # 允许推送包含 .github/workflows/ 变更的提交（上游可能新增 flathub.yml 等）
     outputs:
       release_version: ${{ steps.version.outputs.version }}
     steps:
