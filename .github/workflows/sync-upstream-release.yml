@@ -18,6 +18,8 @@ on:
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       has_new_commits: ${{ steps.check.outputs.has_new_commits }}
     steps:
@@ -53,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: 生成同步版本号
@@ -84,32 +86,32 @@ jobs:
       matrix:
         include:
           - platform: "macos-latest"
-            args: "--target aarch64-apple-darwin"
+            args: '--target aarch64-apple-darwin --config ./tauri.release.conf.json'
             yaak_arch: "arm64"
             os: "macos"
             targets: "aarch64-apple-darwin"
           - platform: "macos-latest"
-            args: "--target x86_64-apple-darwin"
+            args: '--target x86_64-apple-darwin --config ./tauri.release.conf.json'
             yaak_arch: "x64"
             os: "macos"
             targets: "x86_64-apple-darwin"
           - platform: "ubuntu-22.04"
-            args: ""
+            args: '--config ./tauri.release.conf.json'
             yaak_arch: "x64"
             os: "ubuntu"
             targets: ""
           - platform: "ubuntu-22.04-arm"
-            args: ""
+            args: '--config ./tauri.release.conf.json'
             yaak_arch: "arm64"
             os: "ubuntu"
             targets: ""
           - platform: "windows-latest"
-            args: ""
+            args: '--config ./tauri.release.conf.json'
             yaak_arch: "x64"
             os: "windows"
             targets: ""
           - platform: "windows-latest"
-            args: "--target aarch64-pc-windows-msvc"
+            args: '--target aarch64-pc-windows-msvc --config ./tauri.release.conf.json'
             yaak_arch: "arm64"
             os: "windows"
             targets: "aarch64-pc-windows-msvc"
@@ -119,8 +121,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -136,7 +141,7 @@ jobs:
         if: matrix.os == 'ubuntu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y cmake ninja-build libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libnss3 patchelf xdg-utils
 
       - name: Install Protoc for plugin-runtime
         uses: arduino/setup-protoc@v3
@@ -156,15 +161,15 @@ jobs:
           echo $dir >> $env:GITHUB_PATH
           & $exe --version
 
-      - run: npm ci
+      - run: vp install
       - run: npm run bootstrap
         env:
           YAAK_TARGET_ARCH: ${{ matrix.yaak_arch }}
       - run: npm run lint
       - name: Run JS Tests
-        run: npm test
+        run: vp test
       - name: Run Rust Tests
-        run: cargo test --all
+        run: cargo test --all --exclude yaak-cli --features yaak-app-client/wry
 
       - name: Set version
         run: npm run replace-version
@@ -204,8 +209,8 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
 
           # Sign vendored binaries with hardened runtime and their specific entitlements
-          codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaakprotoc.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/protoc/yaakprotoc || true
-          codesign --force --options runtime --entitlements crates-tauri/yaak-app/macos/entitlements.yaaknode.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app/vendored/node/yaaknode || true
+          codesign --force --options runtime --entitlements crates-tauri/yaak-app-client/macos/entitlements.yaakprotoc.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app-client/vendored/protoc/yaakprotoc || true
+          codesign --force --options runtime --entitlements crates-tauri/yaak-app-client/macos/entitlements.yaaknode.plist --sign "$APPLE_SIGNING_IDENTITY" crates-tauri/yaak-app-client/vendored/node/yaaknode || true
 
       - name: Configure Fork Build (Config Only)
         shell: bash
@@ -215,50 +220,49 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
-            
-            // Modify tauri.release.conf.json only
-            const configPath = './crates-tauri/yaak-app/tauri.release.conf.json';
-            if (fs.existsSync(configPath)) {
-              try {
-                const conf = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                
-                // Disable updater if key missing
-                if (!process.env.TAURI_PRIVATE_KEY) {
-                   if (conf.plugins && conf.plugins.updater) delete conf.plugins.updater;
-                   if (conf.bundle) conf.bundle.createUpdaterArtifacts = false;
-                   if (conf.build && conf.build.features) {
-                     conf.build.features = conf.build.features.filter(f => f !== 'updater');
-                   }
-                   console.log('Updater disabled.');
-                }
+            const configPath = './crates-tauri/yaak-app-client/tauri.release.conf.json';
+            if (!fs.existsSync(configPath)) {
+              console.error('Missing config:', configPath);
+              process.exit(1);
+            }
+            const conf = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            conf.build = conf.build || {};
+            conf.build.features = Array.isArray(conf.build.features) ? conf.build.features : [];
 
-                // Disable Windows signing if Azure secrets missing
-                if (!process.env.AZURE_CLIENT_ID) {
-                   if (conf.bundle && conf.bundle.windows && conf.bundle.windows.signCommand) {
-                     delete conf.bundle.windows.signCommand;
-                     console.log('Windows signing disabled.');
-                   }
-                }
+            // Always keep a Tauri runtime feature
+            if (!conf.build.features.includes('wry') && !conf.build.features.includes('cef')) {
+              conf.build.features.push('wry');
+            }
 
-                // Remove 'license' feature & permissions
-                if (conf.build && conf.build.features) {
-                  conf.build.features = conf.build.features.filter(f => f !== 'license');
-                }
-                if (conf.app && conf.app.security && conf.app.security.capabilities) {
-                  conf.app.security.capabilities.forEach(cap => {
-                    if (typeof cap === 'object' && cap.permissions) {
-                      cap.permissions = cap.permissions.filter(p => p !== 'yaak-license:default');
-                    }
-                  });
-                }
-                console.log('License feature config removed.');
+            // Disable updater if key missing
+            if (!process.env.TAURI_PRIVATE_KEY) {
+              if (conf.plugins && conf.plugins.updater) delete conf.plugins.updater;
+              if (conf.bundle) conf.bundle.createUpdaterArtifacts = false;
+              conf.build.features = conf.build.features.filter(f => f !== 'updater');
+              console.log('Updater disabled.');
+            }
 
-                fs.writeFileSync(configPath, JSON.stringify(conf, null, 2));
-              } catch (e) {
-                console.error('Error modifying config:', e);
-                process.exit(1);
+            // Disable Windows signing if Azure secrets missing
+            if (!process.env.AZURE_CLIENT_ID) {
+              if (conf.bundle && conf.bundle.windows && conf.bundle.windows.signCommand) {
+                delete conf.bundle.windows.signCommand;
+                console.log('Windows signing disabled.');
               }
             }
+
+            // Remove 'license' feature & permissions
+            conf.build.features = conf.build.features.filter(f => f !== 'license');
+            if (conf.app && conf.app.security && conf.app.security.capabilities) {
+              conf.app.security.capabilities.forEach(cap => {
+                if (typeof cap === 'object' && Array.isArray(cap.permissions)) {
+                  cap.permissions = cap.permissions.filter(p => p !== 'yaak-license:default');
+                }
+              });
+            }
+            console.log('License feature config removed.');
+            console.log('Build features:', conf.build.features);
+
+            fs.writeFileSync(configPath, JSON.stringify(conf, null, 2));
           "
 
       - name: Setup Signing Secrets
@@ -270,10 +274,10 @@ jobs:
           S_APPLE_PWD: ${{ secrets.APPLE_PASSWORD }}
           S_APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          
+
           S_TAURI_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           S_TAURI_PWD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          
+
           S_AZURE_ID: ${{ secrets.AZURE_CLIENT_ID }}
           S_AZURE_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           S_AZURE_TENANT: ${{ secrets.AZURE_TENANT_ID }}
@@ -294,7 +298,7 @@ jobs:
             echo "TAURI_SIGNING_PRIVATE_KEY=$S_TAURI_KEY" >> $GITHUB_ENV
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$S_TAURI_PWD" >> $GITHUB_ENV
           fi
-          
+
           # Windows Signing
           if [ -n "$S_AZURE_ID" ]; then
             echo "AZURE_CLIENT_ID=$S_AZURE_ID" >> $GITHUB_ENV
@@ -307,9 +311,11 @@ jobs:
           YAAK_TARGET_ARCH: ${{ matrix.yaak_arch }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tauriScript: "node ../../node_modules/@tauri-apps/cli/tauri.js"
+          projectPath: ./crates-tauri/yaak-app-client
           tagName: "v${{ needs.prepare.outputs.release_version }}"
           releaseName: "Sync Release ${{ needs.prepare.outputs.release_version }}"
           releaseBody: "Automated sync from [mountain-loop/yaak](https://github.com/mountain-loop/yaak). Built on ${{ github.run_id }}."
           releaseDraft: false
           prerelease: false
-          args: "${{ matrix.args }} --config ./crates-tauri/yaak-app/tauri.release.conf.json"
+          args: "${{ matrix.args }}"
