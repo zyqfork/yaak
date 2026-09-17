@@ -52,6 +52,7 @@ jobs:
       contents: write
     outputs:
       release_version: ${{ steps.version.outputs.version }}
+      build_sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,6 +76,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git rebase upstream/main
           git push origin HEAD:${{ github.ref_name }} --force
+
+      # build jobs must compile the rebased tree, not the pre-rebase github.sha
+      - name: 记录待构建 SHA
+        id: sha
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Build SHA: $SHA"
 
   build-artifacts:
     needs: prepare
@@ -117,9 +126,16 @@ jobs:
             targets: "aarch64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 40
+    env:
+      # Ubuntu runners ship clang 22, which cannot compile sqlite-wasm-rs's
+      # C23 [[noreturn]] attributes. Upstream already ships a prebuilt pkg/;
+      # keep it (same approach as upstream release-cli-npm.yml).
+      SKIP_WASM_BUILD: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.build_sha }}
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
